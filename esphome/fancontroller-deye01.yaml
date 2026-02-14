@@ -1,0 +1,550 @@
+substitutions:
+  devicename: fancontroller-deye01
+
+esphome:
+  name: fancontroller-deye01
+  friendly_name: ${devicename}
+
+  on_boot:
+    then:
+      # Boot: Status LED blue blinking
+      - lambda: |-
+          auto call = id(status_led).turn_on();
+          call.set_rgb(0.0, 0.0, 1.0); // blue
+          call.set_brightness(0.5);
+          call.set_effect("pulse");
+          call.perform();
+
+globals:
+  # Init on first boot
+  - id: init_done
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: fan_level
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: fan_running
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: deye_last_update
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+esp32:
+  board: esp32-s2-saola-1
+  framework:
+    type: esp-idf
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // === Fallback: inverter temperature unavailable or stale ===
+          bool fallback = id(deye_temp_fallback).state;
+          bool inverter_ok = !fallback;
+          // === PID output: 0..100 (%) ===
+          float pid_pct = id(pid_value).state;
+          if (isnan(pid_pct)) pid_pct = 0.0f;
+
+          if (pid_pct < 0.0f) pid_pct = 0.0f;
+          if (pid_pct > 100.0f) pid_pct = 100.0f;
+
+          // Map to 0..1
+          float target = pid_pct / 100.0f;
+
+          // === Fan behavior parameters ===
+          const float hard_off_th = 0.0f; // 2% -> REAL OFF only
+          const float min_run     = 0.05f; // minimum continuous RPM
+          const float max_delta   = 0.02f; // 2% PWM per second (quiet ramp)
+          // Safe fallback: constant 50% PWM, still ramped to avoid audible step
+          const float fallback_target = 0.50f;
+          if (fallback) {
+              target = fallback_target;
+              fallback = true;
+              ESP_LOGW("fanctl", "Fallback active (inverter temp stale/unavailable). target=%.3f", target);
+          }
+
+          // === Continuous cooling logic ===
+          bool running = id(fan_running);
+
+          if (target <= hard_off_th) {
+            // True idle: very low demand -> stop fans
+            running = false;
+            target = 0.0f;
+          } else {
+            // Normal operation: ALWAYS running
+            running = true;
+            if (target < min_run)
+              target = min_run;
+          }
+
+          id(fan_running) = running;
+
+          // === Slew-rate limiter ===
+          float last = id(fan_level);
+          float delta = target - last;
+
+          if (delta >  max_delta) delta =  max_delta;
+          if (delta < -max_delta) delta = -max_delta;
+
+          float level = last + delta;
+
+          if (level < 0.0f) level = 0.0f;
+          if (level > 1.0f) level = 1.0f;
+
+          id(fan_level) = level;
+
+          // === Apply PWM ===
+          id(pwm_fan1).set_level(level);
+          id(pwm_fan2).set_level(level);
+          id(pwm_fan3).set_level(level);
+          id(pwm_fan4).set_level(level);
+
+          ESP_LOGD("fanctl",
+            "mode=%s inv_ok=%d pid=%.1f%% target=%.3f level=%.3f running=%d",
+            fallback ? "FALLBACK" : "PID",
+            (int)inverter_ok,
+            pid_pct, target, level, (int)running);
+      # Fan 1 LED
+      - lambda: |-
+          // Read RPM
+          float rpm = id(fan1_speed).state;
+          if (isnan(rpm)) rpm = 0;
+
+          // clamp 0..1900
+          if (rpm < 0) rpm = 0;
+          if (rpm > 1900) rpm = 1900;
+
+          // map rpm to 0..1
+          float f = rpm / 1900.0;
+
+          // interpolate: red -> green
+          int r = (1.0 - f) * 255;
+          int g = f * 255;
+          int b = 0;
+
+          // set LED
+          auto led = id(fan1_led).turn_on();
+          led.set_rgb(r/255.0, g/255.0, b/255.0);
+          led.set_brightness(0.5);
+          led.set_effect("none");
+          led.perform();
+      # Fan 2 LED
+      - lambda: |-
+          // Read RPM
+          float rpm = id(fan2_speed).state;
+          if (isnan(rpm)) rpm = 0;
+
+          // clamp 0..1900
+          if (rpm < 0) rpm = 0;
+          if (rpm > 1900) rpm = 1900;
+
+          // map rpm to 0..1
+          float f = rpm / 1900.0;
+
+          // interpolate: red -> green
+          int r = (1.0 - f) * 255;
+          int g = f * 255;
+          int b = 0;
+
+          // set LED
+          auto led = id(fan2_led).turn_on();
+          led.set_rgb(r/255.0, g/255.0, b/255.0);
+          led.set_brightness(0.5);
+          led.set_effect("none");
+          led.perform();
+      # Fan 3 LED
+      - lambda: |-
+          // Read RPM
+          float rpm = id(fan3_speed).state;
+          if (isnan(rpm)) rpm = 0;
+
+          // clamp 0..1900
+          if (rpm < 0) rpm = 0;
+          if (rpm > 1900) rpm = 1900;
+
+          // map rpm to 0..1
+          float f = rpm / 1900.0;
+
+          // interpolate: red -> green
+          int r = (1.0 - f) * 255;
+          int g = f * 255;
+          int b = 0;
+
+          // set LED
+          auto led = id(fan3_led).turn_on();
+          led.set_rgb(r/255.0, g/255.0, b/255.0);
+          led.set_brightness(0.5);
+          led.set_effect("none");
+          led.perform();
+      # Fan 4 LED
+      - lambda: |-
+          // Read RPM
+          float rpm = id(fan4_speed).state;
+          if (isnan(rpm)) rpm = 0;
+
+          // clamp 0..1900
+          if (rpm < 0) rpm = 0;
+          if (rpm > 1900) rpm = 1900;
+
+          // map rpm to 0..1
+          float f = rpm / 1900.0;
+
+          // interpolate: red -> green
+          int r = (1.0 - f) * 255;
+          int g = f * 255;
+          int b = 0;
+
+          // set LED
+          auto led = id(fan4_led).turn_on();
+          led.set_rgb(r/255.0, g/255.0, b/255.0);
+          led.set_brightness(0.5);
+          led.set_effect("none");
+          led.perform();
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+    light: WARN
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+packages:
+  wifi: !include includes/packages/wifi.yaml
+  board_temp: !include includes/packages/internal_temp.yaml
+
+wifi:
+  on_connect:
+    then:
+      # Status LED -> Green
+      - lambda: |-
+          auto call = id(status_led).turn_on();
+          call.set_rgb(0.0, 1.0, 0.0); // green
+          call.set_brightness(0.5);
+          call.set_effect("none");
+          call.perform();
+      # Status LED -> Lower green after 1 minute
+      - delay: 60s
+      - lambda: |-
+          auto call = id(status_led).turn_on();
+          call.set_rgb(0.0, 1.0, 0.0); // green
+          call.set_brightness(0.1);
+          call.set_effect("none");
+          call.perform();
+
+  on_disconnect:
+    then:
+      # Red blinking led indicating an error with wifi
+      - lambda: |-
+          auto call = id(status_led).turn_on();
+          call.set_rgb(1.0, 0.0, 0.0); // red
+          call.set_brightness(0.25);
+          call.set_effect("pulse");
+          call.perform();
+
+# In combination with the `ap` this allows the user
+# to provision wifi credentials to the device.
+captive_portal:
+
+web_server:
+  port: 80
+
+# I2C for HDC1080 onboard & QWIIC connector
+i2c:
+  sda: GPIO33
+  scl: GPIO34
+  scan: true
+  id: bus_a
+
+# PWM Outputs (internal only)
+output:
+  - platform: ledc
+    pin: GPIO12
+    id: pwm_fan1
+    frequency: "25000 Hz"
+  - platform: ledc
+    pin: GPIO13
+    id: pwm_fan2
+    frequency: "25000 Hz"
+  - platform: ledc
+    pin: GPIO14
+    id: pwm_fan3
+    frequency: "25000 Hz"
+  - platform: ledc
+    pin: GPIO15
+    id: pwm_fan4
+    frequency: "25000 Hz"
+  - platform: template
+    id: pid_dummy
+    type: float
+    write_action:
+      - lambda: |-
+          // PID output is consumed via pid_value sensor, real PWM is set in interval lambda
+
+
+
+sensor:
+  # Temperature & Humidity Sensor
+  - platform: hdc1080
+    temperature:
+      name: "Internal Temperature"
+    humidity:
+      name: "Internal Humidity"
+    update_interval: 60s
+  - platform: stts22h
+    name: "External Temperature"
+    id: temperature_sensor
+    address: 0x3C
+    update_interval: 5s
+    filters:
+      - sliding_window_moving_average:
+          window_size: 12
+          send_every: 1
+  - platform: homeassistant
+    id: deye_temperature
+    entity_id: sensor.deye_sunsynk_sol_ark_3_phase_temperature
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            id(deye_last_update) = millis();
+  - platform: template
+    id: control_temperature
+    internal: true
+    lambda: |-
+      if (id(deye_temp_fallback).state) {
+        return id(temperature_sensor).state + 7.0f;  // external + 7*C
+      }
+      return id(deye_temperature).state;                                      // Deye/HA
+
+  # Fan 1 Sense
+  - platform: pulse_counter
+    pin:
+      number: GPIO16
+      mode: INPUT_PULLUP
+    unit_of_measurement: 'RPM'
+    id: fan1_speed
+    name: Fan 1 Speed
+    accuracy_decimals: 0
+    filters:
+      - multiply: 0.5 # Fans output 2 pulses per revolution
+    update_interval: 10s
+
+  # Fan 2 Sense
+  - platform: pulse_counter
+    pin:
+      number: GPIO17
+      mode: INPUT_PULLUP
+    unit_of_measurement: 'RPM'
+    id: fan2_speed
+    name: Fan 2 Speed
+    accuracy_decimals: 0
+    filters:
+      - multiply: 0.5 # Fans output 2 pulses per revolution
+    update_interval: 10s
+
+  # Fan 3 Sense
+  - platform: pulse_counter
+    pin:
+      number: GPIO18
+      mode: INPUT_PULLUP
+    unit_of_measurement: 'RPM'
+    id: fan3_speed
+    name: Fan 3 Speed
+    accuracy_decimals: 0
+    filters:
+      - multiply: 0.5 # Fans output 2 pulses per revolution
+    update_interval: 10s
+
+  # Fan 4 Sense
+  - platform: pulse_counter
+    pin:
+      number: GPIO21
+      mode: INPUT_PULLUP
+    unit_of_measurement: 'RPM'
+    id: fan4_speed
+    name: Fan 4 Speed
+    accuracy_decimals: 0
+    filters:
+      - multiply: 0.5 # Fans output 2 pulses per revolution
+    update_interval: 10s
+
+  - platform: pid
+    name: "PID Fan1 Result"
+    id: pid_result
+    type: RESULT
+  - platform: pid
+    name: "PID Fan1 Error"
+    type: ERROR
+    filters:
+      - multiply: -1.0
+  - platform: pid
+    name: "PID Fan1 P"
+    type: PROPORTIONAL
+    filters:
+      - multiply: -1.0
+  - platform: pid
+    name: "PID Fan1 I"
+    type: INTEGRAL
+    filters:
+      - multiply: -1.0
+  - platform: pid
+    name: "PID Fan1 D"
+    type: DERIVATIVE
+    filters:
+      - multiply: -1.0
+  - platform: pid
+    id: pid_value
+    name: "PID Climate Value"
+    type: COOL
+binary_sensor:
+  # USR1 Button
+  - platform: gpio
+    pin:
+      number: GPIO38
+      inverted: True
+    name: "USR1"
+    id: btn_usr1
+  # USR2 Button
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: True
+    name: "USR2"
+    id: btn_usr2
+  # USR3 Button
+  - platform: gpio
+    pin:
+      number: GPIO36
+      inverted: True
+    name: "USR3"
+    id: btn_usr3
+  - platform: template
+    name: "Fallback temperature sensor active"
+    id: deye_temp_fallback
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      const uint32_t timeout_ms = 600000; // 10 min
+      const uint32_t now = millis();
+
+      const bool fresh = (now - id(deye_last_update)) < timeout_ms;
+      const float t = id(deye_temperature).state;
+
+      const bool ok = fresh && !isnan(t);
+      return !ok;
+button:
+  - platform: template
+    name: "Reset PID Integral Term"
+    on_press:
+      - climate.pid.reset_integral_term: pid_fan1
+  - platform: template
+    name: "PID Autotune"
+    on_press:
+      - climate.pid.autotune: pid_fan1
+
+light:
+  # Status LED (Bus)
+  # Not meant to be directly controlled, broken down to individual
+  # partitions for status and each LED.
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    name: "Status LEDs"
+    chipset: WS2812
+    pin: GPIO01
+    num_leds: 5
+    id: status_leds
+    internal: True
+
+  # Board Status LED next to power input
+  - platform: partition
+    name: "Board Status"
+    id: status_led
+    internal: True
+    default_transition_length: 0s
+    segments:
+      - id: status_leds
+        from: 0
+        to: 0
+    effects:
+      - pulse:
+      - random:
+      - strobe:
+      - flicker:
+      - addressable_rainbow:
+      - addressable_color_wipe:
+      - addressable_scan:
+      - addressable_twinkle:
+      - addressable_random_twinkle:
+      - addressable_fireworks:
+      - addressable_flicker:
+
+  # Fan 1 LED
+  - platform: partition
+    name: "Fan 1 Status"
+    id: fan1_led
+    internal: True
+    default_transition_length: 0s
+    segments:
+      - id: status_leds
+        from: 1
+        to: 1
+  # Fan 2 LED
+  - platform: partition
+    name: "Fan 2 Status"
+    id: fan2_led
+    internal: True
+    default_transition_length: 0s
+    segments:
+      - id: status_leds
+        from: 2
+        to: 2
+  # Fan 3 LED
+  - platform: partition
+    name: "Fan 3 Status"
+    id: fan3_led
+    internal: True
+    default_transition_length: 0s
+    segments:
+      - id: status_leds
+        from: 3
+        to: 3
+  # Fan 4 LED
+  - platform: partition
+    name: "Fan 4 Status"
+    id: fan4_led
+    internal: True
+    default_transition_length: 0s
+    segments:
+      - id: status_leds
+        from: 4
+        to: 4
+
+climate:
+  - platform: pid
+    id: pid_fan1
+    name: "PID Fan1"
+    sensor: control_temperature
+    default_target_temperature: 40°C
+    visual:
+      min_temperature: 25
+      max_temperature: 50
+      temperature_step: 0.5
+    cool_output: pid_dummy  # Required by PID, but interval lambda syncs all fans
+    control_parameters:
+      kp: 0.31831
+      ki: 0.00043
+      kd: 47.11211
+      output_averaging_samples: 3      # smooth the output over 3 samples (3*5=15 seconds)

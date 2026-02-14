@@ -1,0 +1,26 @@
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ${devicename} Fallback
+    password: "Tes7ytKbW5O8"
+
+sensor:
+  # Wireless Signal - RSSI
+  - platform: wifi_signal
+    id: wifi_rssi
+    name: Wifi Signal
+    icon: "mdi:wifi"
+    update_interval: 60s
+    unit_of_measurement: "dB"
+    accuracy_decimals: 0
+    disabled_by_default: true
+    device_class: "signal_strength"
+    state_class: "measurement"
+  # - platform: uptime
+  #   id: node_uptime
+  #   name: Uptime
+  #   icon: "mdi:timer"
+  #   update_interval: 60s
+  #   disabled_by_default: true
